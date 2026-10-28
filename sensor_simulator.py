@@ -84,7 +84,10 @@ while True:
             "Smoke": reading["smoke"],
             "Status": result["status"],
             "Score": result["anomaly_score"],
-            "Reason": result["message"]
+            "Reason": result.get(
+                            "reason",
+                            result.get("message", "No explanation returned.")
+                        )
         }
 
         with open(HISTORY_FILE, "a", encoding="utf-8") as f:

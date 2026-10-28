@@ -54,12 +54,24 @@ def predict(reading: SensorReading):
         status = "normal"
         message = "No anomaly detected by the model"
 
+    
     return {
         "prediction": prediction,
-        "status": status,
+        "status": "anomaly" if prediction == -1 else "normal",
         "anomaly_score": round(score, 6),
-        "message": message
+        "reason": (
+            "The sensor reading differs from patterns "
+            "learned by the Isolation Forest model."
+            if prediction == -1
+            else "The model did not flag this reading as unusual."
+        ),
+        "message": (
+            "Unusual sensor pattern detected"
+            if prediction == -1
+            else "No anomaly detected by the model"
+        )
     }
+
 
 class TemperatureContext(BaseModel):
     previous_temp: float

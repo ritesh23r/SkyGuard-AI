@@ -422,7 +422,10 @@ if submitted:
 
         status = result["status"]
         score = float(result["anomaly_score"])
-        reason = result.get("message", "No message returned.")
+        reason = result.get(
+                    "reason",
+                    result.get("message", "No explanation returned.")
+                )
 
         record = {
             "Time": datetime.now().strftime(
