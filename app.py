@@ -33,8 +33,6 @@ def home():
 
 
 @app.post("/predict")
-
-@app.post("/predict")
 def predict(reading: SensorReading):
     data = reading.model_dump()
 

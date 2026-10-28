@@ -24,6 +24,74 @@ st.set_page_config(
 )
 
 
+# ---------------- DARK COMMAND CENTER THEME ----------------
+
+st.markdown(
+    """
+    <style>
+        .stApp {
+            background-color: #0B1220;
+            color: #E5EDF7;
+        }
+
+        [data-testid="stSidebar"] {
+            background-color: #101B2D;
+            border-right: 1px solid #243247;
+        }
+
+        [data-testid="stMetric"] {
+            background-color: #111E30;
+            border: 1px solid #243247;
+            padding: 18px;
+            border-radius: 12px;
+        }
+
+        [data-testid="stMetricLabel"] {
+            color: #94A3B8;
+        }
+
+        [data-testid="stMetricValue"] {
+            color: #F1F5F9;
+        }
+
+        h1, h2, h3 {
+            color: #F1F5F9;
+        }
+
+        p, label {
+            color: #CBD5E1;
+        }
+
+        div.stButton > button,
+        div.stFormSubmitButton > button {
+            background-color: #123B46;
+            color: #67E8F9;
+            border: 1px solid #236477;
+            border-radius: 8px;
+        }
+
+        div.stButton > button:hover,
+        div.stFormSubmitButton > button:hover {
+            background-color: #185566;
+            color: #FFFFFF;
+            border-color: #67E8F9;
+        }
+
+        [data-testid="stDataFrame"] {
+            border: 1px solid #243247;
+            border-radius: 10px;
+        }
+
+        hr {
+            border-color: #243247;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+
 # ---------------- PAGE HEADER ----------------
 
 st.title("SkyGuard AI")
