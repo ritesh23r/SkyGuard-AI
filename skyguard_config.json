@@ -1,0 +1,17 @@
+{
+    "features": [
+        "co",
+        "humidity",
+        "light",
+        "lpg",
+        "motion",
+        "smoke",
+        "temp"
+    ],
+    "contamination": "auto",
+    "random_state": 42,
+    "prediction_labels": {
+        "1": "normal",
+        "-1": "anomaly"
+    }
+}
