@@ -82,6 +82,8 @@ while True:
             "CO": reading["co"],
             "LPG": reading["lpg"],
             "Smoke": reading["smoke"],
+            "Light": reading["light"],
+            "Motion": reading["motion"],
             "Status": result["status"],
             "Score": result["anomaly_score"],
             "Reason": result.get(

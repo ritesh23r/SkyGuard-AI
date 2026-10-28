@@ -2,81 +2,71 @@
 import json
 import os
 import time
-from collections import deque
-from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
 
-# --------------------------------------------------
-# CONFIGURATION
-# --------------------------------------------------
 
-st.set_page_config(
-    page_title="SkyGuard AI",
-    page_icon="🌍",
-    layout="wide",
-)
+# ---------------- CONFIGURATION ----------------
 
 API_URL = "http://127.0.0.1:8000/predict"
 HISTORY_FILE = "sensor_history.jsonl"
+
 MAX_HISTORY_RECORDS = 1000
 CHART_RECORDS = 100
 
-# --------------------------------------------------
-# PAGE HEADER
-# --------------------------------------------------
+st.set_page_config(
+    page_title="SkyGuard AI",
+    page_icon="🛡️",
+    layout="wide",
+)
+
+
+# ---------------- PAGE HEADER ----------------
 
 st.title("SkyGuard AI")
-st.caption("AI-powered environmental sensor anomaly monitoring")
+st.caption(
+    "IoT Sensor Monitoring and Anomaly Detection System"
+)
 
 st.markdown(
     """
-    SkyGuard AI analyzes environmental sensor readings and flags
-    unusual patterns using an Isolation Forest machine learning model.
-
-    **Note:** Automatic readings are simulated using historical
-    dataset records, not collected from physical sensors.
+    Monitor environmental sensor readings, investigate unusual
+    patterns, and test new sensor readings using an Isolation Forest model.
     """
 )
 
-# Keep manual testing history between Streamlit reruns.
-if "history" not in st.session_state:
-    st.session_state.history = []
 
+# ---------------- LOAD HISTORY ----------------
 
-# --------------------------------------------------
-# LOAD SENSOR HISTORY WITHOUT USING TOO MUCH MEMORY
-# --------------------------------------------------
-
+@st.cache_data(ttl=2)
 def load_sensor_history():
-    """Load only the latest sensor records from the JSONL file."""
-
     if not os.path.exists(HISTORY_FILE):
         return pd.DataFrame()
 
-    records = deque(maxlen=MAX_HISTORY_RECORDS)
+    records = []
 
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as file:
-            for line in file:
-                try:
-                    record = json.loads(line)
-                    records.append(record)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-    except OSError as error:
-        st.warning(f"Could not read sensor history: {error}")
+            lines = file.readlines()[-MAX_HISTORY_RECORDS:]
+
+        for line in lines:
+            try:
+                record = json.loads(line)
+                records.append(record)
+            except json.JSONDecodeError:
+                continue
+
+    except OSError:
         return pd.DataFrame()
 
     if not records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(list(records))
+    sensor_df = pd.DataFrame(records)
 
-    # Convert columns to numeric values for charts and metrics.
     numeric_columns = [
         "Temperature",
         "Humidity",
@@ -87,56 +77,67 @@ def load_sensor_history():
     ]
 
     for column in numeric_columns:
-        if column in df.columns:
-            df[column] = pd.to_numeric(
-                df[column], errors="coerce"
+        if column in sensor_df.columns:
+            sensor_df[column] = pd.to_numeric(
+                sensor_df[column],
+                errors="coerce",
             )
 
-    if "Time" in df.columns:
-        df["Time"] = pd.to_datetime(
-            df["Time"], errors="coerce"
+    if "Time" in sensor_df.columns:
+        sensor_df["Time"] = pd.to_datetime(
+            sensor_df["Time"],
+            errors="coerce",
         )
-        df = df.dropna(subset=["Time"])
-        df = df.sort_values("Time").reset_index(drop=True)
 
-    return df
+    if "Status" in sensor_df.columns:
+        sensor_df["Status"] = (
+            sensor_df["Status"].astype(str).str.lower()
+        )
 
+    sensor_df = sensor_df.dropna(subset=["Time"])
+    sensor_df = sensor_df.sort_values("Time").reset_index(drop=True)
 
-# --------------------------------------------------
-# AUTOMATIC MONITORING SETTINGS
-# --------------------------------------------------
+    return sensor_df
 
-st.header("Automatic Sensor Monitoring")
-
-auto_refresh = st.checkbox(
-    "Refresh dashboard automatically every 5 seconds",
-    value=True,
-    key="auto_refresh",
-)
 
 sensor_df = load_sensor_history()
 
 
-# --------------------------------------------------
-# ALERT PANEL
-# --------------------------------------------------
+# ---------------- SIDEBAR ----------------
 
-st.subheader("Alert Panel")
+st.sidebar.header("Dashboard Controls")
+
+auto_refresh = st.sidebar.checkbox(
+    "Auto-refresh every 5 seconds",
+    value=False,
+)
+
+if st.sidebar.button("Refresh dashboard"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.caption(
+    "The simulator must be running to receive new readings."
+)
+
+
+# ---------------- SYSTEM STATUS ----------------
+
+st.subheader("System Status")
 
 if sensor_df.empty:
     st.info(
-        "No sensor readings found yet. Start the FastAPI server "
-        "and run sensor_simulator.py in separate terminals."
+        "No sensor history found yet. Start the FastAPI server "
+        "and sensor simulator, then wait for the first reading."
     )
-
 else:
     latest = sensor_df.iloc[-1]
-    latest_status = str(latest.get("Status", "unknown")).lower()
+    latest_status = latest.get("Status", "unknown")
 
     if latest_status == "anomaly":
         st.error(
-            "ANOMALY ALERT: The latest sensor reading has been "
-            "flagged as unusual by the model."
+            "ANOMALY ALERT: The latest sensor reading was flagged "
+            "as unusual by the model."
         )
     elif latest_status == "normal":
         st.success(
@@ -146,208 +147,291 @@ else:
     else:
         st.warning("The latest reading has an unknown status.")
 
-    # Show recent anomaly events.
-    if "Status" in sensor_df.columns:
-        anomaly_df = sensor_df[
-            sensor_df["Status"].astype(str).str.lower() == "anomaly"
-        ].copy()
-    else:
-        anomaly_df = pd.DataFrame()
+    # ---------------- LATEST READING METRICS ----------------
 
-    if not anomaly_df.empty:
-        st.markdown("**Recent anomaly events**")
-        display_columns = [
-            column
-            for column in [
-                "Time",
-                "Temperature",
-                "Humidity",
-                "CO",
-                "LPG",
-                "Smoke",
-                "Score",
-                "Reason",
-            ]
-            if column in anomaly_df.columns
-        ]
-
-        st.dataframe(
-            anomaly_df[display_columns].tail(10).iloc[::-1],
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("No anomaly events are present in the loaded history.")
-
-
-# --------------------------------------------------
-# LIVE SUMMARY METRICS
-# --------------------------------------------------
-
-st.divider()
-st.subheader("Live Sensor Summary")
-
-if not sensor_df.empty:
-    latest = sensor_df.iloc[-1]
-
-    total_readings = len(sensor_df)
-
-    if "Status" in sensor_df.columns:
-        anomaly_count = int(
-            (
-                sensor_df["Status"].astype(str).str.lower()
-                == "anomaly"
-            ).sum()
-        )
-    else:
-        anomaly_count = 0
+    st.subheader("Latest Sensor Reading")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    temperature = latest.get("Temperature", None)
-    humidity = latest.get("Humidity", None)
+    temperature = latest.get("Temperature")
+    humidity = latest.get("Humidity")
+    co_value = latest.get("CO")
+    score = latest.get("Score")
 
     col1.metric(
-        "Latest Temperature",
+        "Temperature",
         f"{temperature:.2f} °C"
         if pd.notna(temperature)
         else "N/A",
     )
 
     col2.metric(
-        "Latest Humidity",
+        "Humidity",
         f"{humidity:.2f}%"
         if pd.notna(humidity)
         else "N/A",
     )
 
     col3.metric(
-        "Loaded Readings",
-        f"{total_readings:,}",
+        "CO",
+        f"{co_value:.4f}"
+        if pd.notna(co_value)
+        else "N/A",
     )
 
     col4.metric(
-        "Anomaly Readings",
-        f"{anomaly_count:,}",
+        "Anomaly Score",
+        f"{score:.6f}"
+        if pd.notna(score)
+        else "N/A",
     )
 
     st.caption(
-        f"Summary uses the latest {total_readings:,} available "
-        "records loaded by the dashboard, not necessarily the "
-        "entire history file."
+        "A higher anomaly score indicates a more unusual reading "
+        "relative to the model's learned patterns. It is not a "
+        "probability of failure."
     )
 
+    # ---------------- SENSOR INVESTIGATION ----------------
 
-# --------------------------------------------------
-# LATEST AUTOMATIC READINGS
-# --------------------------------------------------
+    st.subheader("Sensor-Level Investigation")
 
-st.divider()
-st.subheader("Latest Automatic Sensor Readings")
+    sensor_columns = [
+        ("Temperature", "Temperature", "°C"),
+        ("Humidity", "Humidity", "%"),
+        ("CO", "CO", ""),
+        ("LPG", "LPG", ""),
+        ("Smoke", "Smoke", ""),
+        ("Light", "Light", ""),
+        ("Motion", "Motion", ""),
+    ]
 
-if not sensor_df.empty:
-    st.dataframe(
-        sensor_df.tail(20).iloc[::-1],
+    sensor_cols = st.columns(4)
+
+    for index, (column, label, unit) in enumerate(sensor_columns):
+        with sensor_cols[index % 4]:
+            value = latest.get(column)
+
+            if pd.isna(value) if value is not None else True:
+                display_value = "Not recorded"
+            elif column in ("Light", "Motion"):
+                display_value = str(value)
+            elif unit:
+                display_value = f"{float(value):.2f} {unit}"
+            else:
+                display_value = f"{float(value):.5f}"
+
+            st.metric(label, display_value)
+
+    st.caption(
+        "These are the sensor values recorded for the latest reading. "
+        "Light and Motion appear only in records created after those "
+        "fields were added to the simulator."
+    )
+
+    # ---------------- LATEST ANOMALY DETAILS ----------------
+
+    if latest_status == "anomaly":
+        st.subheader("Latest Anomaly Details")
+
+        detail_col1, detail_col2 = st.columns(2)
+
+        timestamp = latest.get("Time")
+        reason = latest.get(
+            "Reason",
+            "No explanation was saved for this reading.",
+        )
+
+        detail_col1.write("**Reading time**")
+
+        if pd.notna(timestamp):
+            detail_col1.write(timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            detail_col1.write("Not available")
+
+        detail_col2.write("**Why was this flagged?**")
+        detail_col2.write(reason)
+
+    # ---------------- ANOMALY HISTORY ----------------
+
+    st.subheader("Recent Anomaly Events")
+
+    anomaly_df = sensor_df[
+        sensor_df["Status"] == "anomaly"
+    ].copy()
+
+    if anomaly_df.empty:
+        st.success("No anomalies have been recorded in the loaded history.")
+    else:
+        display_columns = [
+            "Time",
+            "Temperature",
+            "Humidity",
+            "CO",
+            "LPG",
+            "Smoke",
+            "Light",
+            "Motion",
+            "Score",
+            "Reason",
+        ]
+
+        available_columns = [
+            column
+            for column in display_columns
+            if column in anomaly_df.columns
+        ]
+
+        st.dataframe(
+            anomaly_df[available_columns].tail(20).iloc[::-1],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # ---------------- SENSOR CHARTS ----------------
+
+    st.subheader("Sensor Trends")
+
+    chart_df = sensor_df.tail(CHART_RECORDS).copy()
+
+    chart_options = [
+        column
+        for column in [
+            "Temperature",
+            "Humidity",
+            "CO",
+            "LPG",
+            "Smoke",
+            "Score",
+        ]
+        if column in chart_df.columns
+    ]
+
+    if chart_options:
+        selected_sensors = st.multiselect(
+            "Select measurements to display",
+            options=chart_options,
+            default=[
+                column
+                for column in ["Temperature", "Humidity"]
+                if column in chart_options
+            ],
+        )
+
+        if selected_sensors:
+            chart_long = chart_df[
+                ["Time"] + selected_sensors
+            ].melt(
+                id_vars="Time",
+                var_name="Sensor",
+                value_name="Value",
+            )
+
+            figure = px.line(
+                chart_long,
+                x="Time",
+                y="Value",
+                color="Sensor",
+                title="Recent Sensor Measurements",
+                markers=True,
+            )
+
+            figure.update_layout(
+                xaxis_title="Reading Time",
+                yaxis_title="Sensor Value",
+                legend_title="Measurement",
+            )
+
+            st.plotly_chart(
+                figure,
+                use_container_width=True,
+            )
+        else:
+            st.info("Select at least one measurement to display.")
+
+    # ---------------- ANOMALY DISTRIBUTION ----------------
+
+    st.subheader("Anomaly Overview")
+
+    total_readings = len(sensor_df)
+    total_anomalies = int(
+        (sensor_df["Status"] == "anomaly").sum()
+    )
+    total_normal = int(
+        (sensor_df["Status"] == "normal").sum()
+    )
+
+    anomaly_percentage = (
+        total_anomalies / total_readings * 100
+        if total_readings
+        else 0
+    )
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+
+    metric1.metric("Readings Loaded", total_readings)
+    metric2.metric("Normal Readings", total_normal)
+    metric3.metric("Anomalies", total_anomalies)
+    metric4.metric("Anomaly Rate", f"{anomaly_percentage:.2f}%")
+
+    distribution_df = pd.DataFrame(
+        {
+            "Status": ["Normal", "Anomaly"],
+            "Count": [total_normal, total_anomalies],
+        }
+    )
+
+    distribution_fig = px.bar(
+        distribution_df,
+        x="Status",
+        y="Count",
+        color="Status",
+        title="Normal vs Anomalous Readings",
+        text="Count",
+    )
+
+    st.plotly_chart(
+        distribution_fig,
         use_container_width=True,
-        hide_index=True,
     )
 
-    csv_data = sensor_df.to_csv(index=False).encode("utf-8")
+    # ---------------- DOWNLOAD HISTORY ----------------
+
+    st.subheader("Export Data")
+
+    download_df = sensor_df.copy()
+
+    if "Time" in download_df.columns:
+        download_df["Time"] = download_df["Time"].astype(str)
 
     st.download_button(
-        label="Download Automatic Sensor History (CSV)",
-        data=csv_data,
+        label="Download Sensor History as CSV",
+        data=download_df.to_csv(index=False).encode("utf-8"),
         file_name="skyguard_sensor_history.csv",
         mime="text/csv",
     )
 
 
-# --------------------------------------------------
-# SENSOR TREND ANALYSIS - PLOTLY ONLY
-# --------------------------------------------------
+# ---------------- MANUAL SENSOR TEST ----------------
 
 st.divider()
-st.header("Sensor Trend Analysis")
+st.header("Manual Sensor Test")
 
-if not sensor_df.empty:
-    chart_df = sensor_df.tail(CHART_RECORDS).copy()
-    chart_df = chart_df.reset_index(drop=True)
-    chart_df["Reading Number"] = range(1, len(chart_df) + 1)
-
-    chart_col1, chart_col2 = st.columns(2)
-
-    with chart_col1:
-        if "Temperature" in chart_df.columns:
-            fig_temp = px.line(
-                chart_df,
-                x="Reading Number",
-                y="Temperature",
-                title="Temperature Trend",
-                markers=True,
-            )
-            st.plotly_chart(
-                fig_temp,
-                use_container_width=True,
-            )
-
-    with chart_col2:
-        if "Humidity" in chart_df.columns:
-            fig_humidity = px.line(
-                chart_df,
-                x="Reading Number",
-                y="Humidity",
-                title="Humidity Trend",
-                markers=True,
-            )
-            st.plotly_chart(
-                fig_humidity,
-                use_container_width=True,
-            )
-
-    if "Score" in chart_df.columns:
-        fig_score = px.line(
-            chart_df,
-            x="Reading Number",
-            y="Score",
-            title="Anomaly Score Trend",
-            markers=True,
-        )
-        st.plotly_chart(
-            fig_score,
-            use_container_width=True,
-        )
-
-    st.caption(
-        f"Charts display at most the latest {CHART_RECORDS} readings. "
-        "A higher anomaly score indicates a more unusual reading; "
-        "the score is not a probability."
-    )
-else:
-    st.info("Sensor trend charts will appear after readings arrive.")
-
-
-# --------------------------------------------------
-# MANUAL SENSOR TESTING
-# --------------------------------------------------
-
-st.divider()
-st.header("Manual Sensor Testing")
-
-st.caption(
-    "Enter a sensor reading to test it against the trained model. "
-    "This test sends the values to your local FastAPI server."
+st.write(
+    "Enter sensor values to check whether the model flags the "
+    "reading as unusual. This test does not add the reading to "
+    "the simulator's history file."
 )
 
-with st.form("manual_sensor_form"):
-    col1, col2 = st.columns(2)
+with st.form("manual_sensor_test"):
+    form_col1, form_col2, form_col3 = st.columns(3)
 
-    with col1:
-        temp = st.number_input(
-            "Temperature (°C)",
-            min_value=-50.0,
-            max_value=100.0,
-            value=25.0,
-            step=0.1,
+    with form_col1:
+        co = st.number_input(
+            "CO",
+            min_value=0.0,
+            value=0.004,
+            format="%.6f",
         )
 
         humidity = st.number_input(
@@ -355,50 +439,45 @@ with st.form("manual_sensor_form"):
             min_value=0.0,
             max_value=100.0,
             value=50.0,
-            step=0.1,
         )
 
-        co = st.number_input(
-            "CO",
-            min_value=0.0,
-            value=0.01318,
-            format="%.6f",
+        light = st.selectbox(
+            "Light detected?",
+            options=[False, True],
+            format_func=lambda value: "Yes" if value else "No",
         )
 
+    with form_col2:
         lpg = st.number_input(
             "LPG",
             min_value=0.0,
-            value=0.015524,
+            value=0.007,
             format="%.6f",
         )
 
-    with col2:
+        motion = st.selectbox(
+            "Motion detected?",
+            options=[False, True],
+            format_func=lambda value: "Yes" if value else "No",
+        )
+
+    with form_col3:
         smoke = st.number_input(
             "Smoke",
             min_value=0.0,
-            value=0.043461,
+            value=0.02,
             format="%.6f",
         )
 
-        light = st.toggle(
-            "Light detected",
-            value=False,
-        )
-
-        motion = st.toggle(
-            "Motion detected",
-            value=False,
+        temp = st.number_input(
+            "Temperature (°C)",
+            value=22.0,
         )
 
     submitted = st.form_submit_button(
-        "Analyze Reading",
+        "Analyze Sensor Reading",
         use_container_width=True,
     )
-
-
-# --------------------------------------------------
-# DISPLAY MANUAL PREDICTION
-# --------------------------------------------------
 
 if submitted:
     payload = {
@@ -412,157 +491,55 @@ if submitted:
     }
 
     try:
-        response = requests.post(
-            API_URL,
-            json=payload,
-            timeout=10,
-        )
-        response.raise_for_status()
-        result = response.json()
+        with st.spinner("Analyzing sensor reading..."):
+            response = requests.post(
+                API_URL,
+                json=payload,
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()
 
-        status = result["status"]
-        score = float(result["anomaly_score"])
+        status = result.get("status", "unknown")
+        score = result.get("anomaly_score")
         reason = result.get(
-                    "reason",
-                    result.get("message", "No explanation returned.")
-                )
-
-        record = {
-            "Time": datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-            "Temperature": temp,
-            "Humidity": humidity,
-            "CO": co,
-            "LPG": lpg,
-            "Smoke": smoke,
-            "Light": light,
-            "Motion": motion,
-            "Status": status,
-            "Score": score,
-            "Reason": reason,
-        }
-
-        st.session_state.history.append(record)
+            "reason",
+            result.get("message", "No explanation returned."),
+        )
 
         st.subheader("Prediction Result")
 
         if status == "anomaly":
-            st.error("Anomaly detected")
+            st.error("Anomaly detected: unusual sensor pattern.")
+        elif status == "normal":
+            st.success("No anomaly detected by the model.")
         else:
-            st.success(
-                "No anomaly detected by the model"
-            )
+            st.warning(f"Unexpected status: {status}")
 
         result_col1, result_col2 = st.columns(2)
 
-        result_col1.metric(
-            "Prediction",
-            status.upper(),
-        )
+        result_col1.metric("Prediction Status", status.title())
 
-        result_col2.metric(
-            "Anomaly Score",
-            f"{score:.6f}",
-        )
+        if score is not None:
+            result_col2.metric(
+                "Anomaly Score",
+                f"{float(score):.6f}",
+            )
 
-        st.write("**Model message:**", reason)
+        st.write("**Model explanation:**", reason)
 
-        st.caption(
-            "This is an anomaly-detection result, not confirmation "
-            "that a real sensor fault or environmental danger exists."
-        )
+        with st.expander("View submitted sensor values"):
+            st.json(payload)
 
     except requests.RequestException as error:
         st.error(
-            "Could not connect to the API. Make sure FastAPI is "
-            "running in another terminal."
+            "Could not connect to the SkyGuard AI API. "
+            "Make sure FastAPI is running at http://127.0.0.1:8000."
         )
-        st.code(str(error))
-
-    except (ValueError, KeyError) as error:
-        st.error(
-            "The API returned an unexpected response. Check app.py "
-            "and the FastAPI terminal."
-        )
-        st.code(str(error))
+        st.caption(str(error))
 
 
-# --------------------------------------------------
-# MANUAL TEST HISTORY
-# --------------------------------------------------
-
-st.divider()
-st.header("Manual Test History")
-
-if st.session_state.history:
-    manual_df = pd.DataFrame(st.session_state.history)
-
-    st.dataframe(
-        manual_df.iloc[::-1],
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.download_button(
-        label="Download Manual Test History (CSV)",
-        data=manual_df.to_csv(index=False).encode("utf-8"),
-        file_name="skyguard_manual_history.csv",
-        mime="text/csv",
-    )
-
-    manual_chart_df = manual_df.tail(CHART_RECORDS).copy()
-    manual_chart_df["Test Number"] = range(
-        1, len(manual_chart_df) + 1
-    )
-
-    manual_col1, manual_col2 = st.columns(2)
-
-    with manual_col1:
-        fig_manual_temp = px.line(
-            manual_chart_df,
-            x="Test Number",
-            y="Temperature",
-            title="Manual Test: Temperature",
-            markers=True,
-        )
-        st.plotly_chart(
-            fig_manual_temp,
-            use_container_width=True,
-        )
-
-    with manual_col2:
-        fig_manual_humidity = px.line(
-            manual_chart_df,
-            x="Test Number",
-            y="Humidity",
-            title="Manual Test: Humidity",
-            markers=True,
-        )
-        st.plotly_chart(
-            fig_manual_humidity,
-            use_container_width=True,
-        )
-
-    fig_manual_score = px.line(
-        manual_chart_df,
-        x="Test Number",
-        y="Score",
-        title="Manual Test: Anomaly Score",
-        markers=True,
-    )
-    st.plotly_chart(
-        fig_manual_score,
-        use_container_width=True,
-    )
-
-else:
-    st.info("No manual tests performed in this session.")
-
-
-# --------------------------------------------------
-# AUTOMATIC REFRESH
-# --------------------------------------------------
+# ---------------- AUTO REFRESH ----------------
 
 if auto_refresh:
     time.sleep(5)
