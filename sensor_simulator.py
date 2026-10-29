@@ -11,7 +11,7 @@ import requests
 # CONFIGURATION
 # -----------------------------------------
 
-API_URL = "http://127.0.0.1:8000/predict"
+API_URL = "https://skyguard-ai-c1wd.onrender.com/predict"
 CSV_FILE = "data/iot_telemetry_data.csv"
 HISTORY_FILE = "tests/sensor_history.jsonl"
 INTERVAL_SECONDS = 5
