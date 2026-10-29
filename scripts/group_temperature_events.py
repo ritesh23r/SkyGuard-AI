@@ -1,7 +1,7 @@
 
 import pandas as pd
 
-df = pd.read_csv("skyguard_temperature_drop_candidates.csv")
+df = pd.read_csv("outputs/skyguard_temperature_drop_candidates.csv")
 
 # Convert Unix timestamps to readable UTC times.
 df["datetime"] = pd.to_datetime(

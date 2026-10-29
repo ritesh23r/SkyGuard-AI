@@ -15,8 +15,8 @@ import streamlit as st
 # ============================================================
 API_BASE_URL = "http://127.0.0.1:8000"
 API_URL = f"{API_BASE_URL}/predict"
-HISTORY_FILE = "sensor_history.jsonl"
-EVENTS_FILE = "skyguard_temperature_events.csv"
+HISTORY_FILE = "tests/sensor_history.jsonl"
+EVENTS_FILE = "outputs/skyguard_temperature_events.csv"
 
 MAX_HISTORY_RECORDS = 1000
 CHART_RECORDS = 150

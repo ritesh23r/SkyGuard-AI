@@ -8,9 +8,9 @@ import pandas as pd
 app = FastAPI(title="SkyGuard AI API")
 
 # Load the trained model and configuration
-model = joblib.load("skyguard_isolation_forest.joblib")
+model = joblib.load("models/skyguard_isolation_forest.joblib")
 
-with open("skyguard_config.json", "r") as f:
+with open("models/skyguard_config.json", "r") as f:
     config = json.load(f)
 
 features = config["features"]

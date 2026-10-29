@@ -12,8 +12,8 @@ import requests
 # -----------------------------------------
 
 API_URL = "http://127.0.0.1:8000/predict"
-CSV_FILE = "iot_telemetry_data.csv"
-HISTORY_FILE = "sensor_history.jsonl"
+CSV_FILE = "data/iot_telemetry_data.csv"
+HISTORY_FILE = "tests/sensor_history.jsonl"
 INTERVAL_SECONDS = 5
 
 FEATURES = [

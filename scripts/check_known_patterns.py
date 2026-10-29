@@ -1,7 +1,7 @@
 
 import pandas as pd
 
-df = pd.read_csv("skyguard_validation_results.csv")
+df = pd.read_csv("outputs/skyguard_validation_results.csv")
 
 # Sort by time so adjacent readings can be compared.
 df = df.sort_values("timestamp").reset_index(drop=True)

@@ -4,7 +4,7 @@ import pandas as pd
 features = ["temp"]
 
 # Load the original dataset.
-df = pd.read_csv("iot_telemetry_data.csv")
+df = pd.read_csv("data/iot_telemetry_data.csv")
 
 df = df[["device", "ts", "temp"]].dropna().copy()
 

@@ -1,7 +1,7 @@
 
 import pandas as pd
 
-df = pd.read_csv("iot_telemetry_data.csv")
+df = pd.read_csv("data/iot_telemetry_data.csv")
 
 df = df.sort_values(["device", "ts"]).copy()
 

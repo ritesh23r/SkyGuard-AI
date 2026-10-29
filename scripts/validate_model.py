@@ -9,7 +9,7 @@ from sklearn.ensemble import IsolationForest
 
 print("Loading sensor dataset...")
 
-df = pd.read_csv("iot_telemetry_data.csv")
+df = pd.read_csv("data/iot_telemetry_data.csv")
 
 features = [
     "co",

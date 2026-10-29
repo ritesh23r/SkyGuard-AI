@@ -2,7 +2,7 @@
 import pandas as pd
 
 # Load the saved validation results
-df = pd.read_csv("skyguard_validation_results.csv")
+df = pd.read_csv("outputs/skyguard_validation_results.csv")
 
 # Keep only readings flagged as anomalies
 anomalies = df[df["prediction"] == -1].copy()
