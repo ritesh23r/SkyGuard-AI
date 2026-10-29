@@ -13,7 +13,7 @@ import streamlit as st
 # ============================================================
 # CONFIGURATION
 # ============================================================
-API_BASE_URL = "https://skyguard-ai-c1wd.onrender.com/predict"
+API_BASE_URL = "https://skyguard-ai-c1wd.onrender.com"
 API_URL = f"{API_BASE_URL}/predict"
 HISTORY_FILE = "tests/sensor_history.jsonl"
 EVENTS_FILE = "outputs/skyguard_temperature_events.csv"
