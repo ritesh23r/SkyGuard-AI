@@ -15,11 +15,24 @@ import streamlit as st
 # ============================================================
 API_BASE_URL = "https://skyguard-ai-c1wd.onrender.com"
 API_URL = f"{API_BASE_URL}/predict"
+HISTORY_URL = f"{API_BASE_URL}/history"
 HISTORY_FILE = "tests/sensor_history.jsonl"
 EVENTS_FILE = "outputs/skyguard_temperature_events.csv"
 
 MAX_HISTORY_RECORDS = 1000
 CHART_RECORDS = 150
+
+# Streamlit Community Cloud reads this setting from App Settings > Secrets.
+# Local runs default to local JSONL history unless the environment variable is set.
+try:
+    remote_setting = st.secrets.get(
+        "SKYGUARD_USE_REMOTE_HISTORY",
+        os.getenv("SKYGUARD_USE_REMOTE_HISTORY", "false"),
+    )
+except Exception:
+    remote_setting = os.getenv("SKYGUARD_USE_REMOTE_HISTORY", "false")
+
+USE_REMOTE_HISTORY = str(remote_setting).lower() == "true"
 
 st.set_page_config(
     page_title="SkyGuard AI | Sensor Intelligence",
@@ -186,23 +199,55 @@ st.markdown(
 # ============================================================
 @st.cache_data(ttl=2)
 def load_sensor_history():
-    """Load recent JSONL records, ignoring malformed lines safely."""
-    if not os.path.exists(HISTORY_FILE):
-        return pd.DataFrame()
-
+    """Load recent records from the cloud API or local JSONL history."""
     records = []
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
-            lines = file.readlines()[-MAX_HISTORY_RECORDS:]
-        for line in lines:
-            try:
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    records.append(item)
-            except json.JSONDecodeError:
-                continue
-    except OSError:
-        return pd.DataFrame()
+
+    if USE_REMOTE_HISTORY:
+        try:
+            response = requests.get(HISTORY_URL, timeout=15)
+            response.raise_for_status()
+            api_records = response.json()
+
+            for item in api_records:
+                if not isinstance(item, dict):
+                    continue
+                reading = item.get("sensor_reading", {})
+                if not isinstance(reading, dict):
+                    reading = {}
+
+                records.append({
+                    "Time": item.get("timestamp"),
+                    "Temperature": reading.get("temp"),
+                    "Humidity": reading.get("humidity"),
+                    "CO": reading.get("co"),
+                    "LPG": reading.get("lpg"),
+                    "Smoke": reading.get("smoke"),
+                    "Light": reading.get("light"),
+                    "Motion": reading.get("motion"),
+                    "Status": item.get("status", "unknown"),
+                    "Score": item.get("anomaly_score"),
+                    "Reason": item.get("reason", item.get("message", "")),
+                    "Device": "Render API",
+                })
+        except (requests.RequestException, ValueError) as error:
+            st.warning(f"Could not load cloud history from the API: {error}")
+            return pd.DataFrame()
+    else:
+        if not os.path.exists(HISTORY_FILE):
+            return pd.DataFrame()
+
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as file:
+                lines = file.readlines()[-MAX_HISTORY_RECORDS:]
+            for line in lines:
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict):
+                        records.append(item)
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            return pd.DataFrame()
 
     if not records:
         return pd.DataFrame()
@@ -215,7 +260,11 @@ def load_sensor_history():
 
     if "Time" not in df.columns:
         df["Time"] = pd.NaT
-    df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
+
+    # Cloud timestamps include a UTC offset; local JSONL timestamps may not.
+    # Normalize both safely so sorting and charts work consistently.
+    parsed_time = pd.to_datetime(df["Time"], errors="coerce", utc=True)
+    df["Time"] = parsed_time.dt.tz_convert(None)
 
     if "Status" not in df.columns:
         df["Status"] = "unknown"
@@ -230,8 +279,12 @@ def load_sensor_history():
         if column not in df.columns:
             df[column] = default
 
-    return df.dropna(subset=["Time"]).sort_values("Time").reset_index(drop=True)
-
+    return (
+        df.dropna(subset=["Time"])
+        .sort_values("Time")
+        .tail(MAX_HISTORY_RECORDS)
+        .reset_index(drop=True)
+    )
 
 @st.cache_data(ttl=30)
 def load_temperature_events():
@@ -340,10 +393,12 @@ with st.sidebar:
     else:
         st.error("FastAPI · Unavailable")
 
-    if os.path.exists(HISTORY_FILE):
-        st.success("History file · Found")
+    if USE_REMOTE_HISTORY:
+        st.success("History source · Render API")
+    elif os.path.exists(HISTORY_FILE):
+        st.success("History source · Local JSONL found")
     else:
-        st.warning("History file · Waiting")
+        st.warning("History source · Waiting for local JSONL")
 
     st.markdown("---")
     st.markdown("#### About this data")
@@ -404,7 +459,7 @@ if not api_reachable:
     st.warning("FastAPI is not responding. Start it with `uvicorn app:app --reload` to enable manual predictions. Existing history can still be reviewed.")
 
 if not has_data:
-    st.info("No sensor history is available yet. Start FastAPI and run `python sensor_simulator.py` to begin replaying historical telemetry.")
+    st.info("No sensor history is available yet. Start the simulator and ensure the dashboard is configured to read the same history source.")
 else:
     latest_status = str(latest.get("Status", "unknown"))
     if latest_status == "anomaly":
@@ -421,7 +476,7 @@ else:
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Latest temperature", display_sensor_value(latest, "Temperature") if has_data else "—")
 k2.metric("Anomalies flagged", f"{total_anomalies:,}", help="Count among the currently loaded history records, not model accuracy.")
-k3.metric("Readings loaded", f"{total_readings:,}", help=f"Most recent records loaded from {HISTORY_FILE}, limited to {MAX_HISTORY_RECORDS}.")
+k3.metric("Readings loaded", f"{total_readings:,}", help=f"Most recent records loaded from the selected history source, limited to {MAX_HISTORY_RECORDS}.")
 k4.metric("Anomaly rate", f"{anomaly_rate:.1f}%", help="Share of loaded readings flagged by the model. This is not accuracy.")
 
 st.markdown("")
@@ -459,11 +514,11 @@ with tab_overview:
                 else:
                     st.info("Choose one or more measurements to plot.")
             else:
-                st.markdown('<div class="sg-callout"><div class="sg-callout-title">Waiting for telemetry</div><div class="sg-callout-copy">When the simulator writes readings to the history file, sensor trends will appear here.</div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="sg-callout"><div class="sg-callout-title">Waiting for telemetry</div><div class="sg-callout-copy">When the API or local simulator records readings, sensor trends will appear here.</div></div>', unsafe_allow_html=True)
 
     with right:
         with st.container(border=True):
-            section_heading("Latest reading", "Most recent record in the history file")
+            section_heading("Latest reading", "Most recent record in the selected history source")
             if has_data:
                 if latest_status == "anomaly":
                     st.warning("⚑  ANOMALY FLAGGED")
@@ -696,7 +751,7 @@ with tab_manual:
                 st.error(f"API request failed with HTTP {response.status_code}.")
                 st.code(response.text[:2000])
         except requests.RequestException as error:
-            st.error("Could not connect to the SkyGuard AI API. Make sure FastAPI is running at http://127.0.0.1:8000.")
+            st.error("Could not connect to the SkyGuard AI API. Check the deployed API URL or your local FastAPI server.")
             st.caption(str(error))
 
 
@@ -711,7 +766,7 @@ with tab_export:
         export_left, export_right = st.columns([1.4, 1], gap="large")
         with export_left:
             with st.container(border=True):
-                section_heading("Sensor history", "Recent records loaded from the JSONL history file")
+                section_heading("Sensor history", "Recent records loaded from the selected history source")
                 st.metric("Rows available for export", f"{len(sensor_df):,}")
                 export_df = sensor_df.copy()
                 export_df["Time"] = export_df["Time"].astype(str)
@@ -725,7 +780,7 @@ with tab_export:
         with export_right:
             with st.container(border=True):
                 section_heading("Export notes")
-                st.write(f"**Source file:** `{HISTORY_FILE}`")
+                st.write(f"**History source:** `{'Render API /history' if USE_REMOTE_HISTORY else HISTORY_FILE}`")
                 st.write(f"**Maximum loaded records:** {MAX_HISTORY_RECORDS:,}")
                 st.write(f"**Records currently loaded:** {len(sensor_df):,}")
                 st.caption("This exports the records loaded by the dashboard, not necessarily the entire source CSV.")
