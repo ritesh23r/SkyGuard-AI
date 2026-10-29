@@ -1,6 +1,8 @@
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from collections import deque
+from datetime import datetime, timezone
 import joblib
 import json
 import pandas as pd
@@ -14,6 +16,10 @@ with open("models/skyguard_config.json", "r") as f:
     config = json.load(f)
 
 features = config["features"]
+
+# Store the latest 1,000 predictions in memory
+# Note: This history resets when the API restarts.
+sensor_history = deque(maxlen=1000)
 
 
 # Define the incoming sensor data
@@ -36,6 +42,7 @@ def home():
 def predict(reading: SensorReading):
     data = reading.model_dump()
 
+    # Prepare input in the exact feature order
     X_new = pd.DataFrame([data], columns=features)
     X_new["light"] = X_new["light"].astype(int)
     X_new["motion"] = X_new["motion"].astype(int)
@@ -44,7 +51,7 @@ def predict(reading: SensorReading):
     prediction = int(model.predict(X_new)[0])
     score = float(-model.score_samples(X_new)[0])
 
-    # Combine the results into one alert
+    # Create the alert
     if prediction == -1:
         status = "anomaly"
         message = "Unusual sensor pattern detected"
@@ -52,10 +59,10 @@ def predict(reading: SensorReading):
         status = "normal"
         message = "No anomaly detected by the model"
 
-    
-    return {
+    # Build the API response
+    result = {
         "prediction": prediction,
-        "status": "anomaly" if prediction == -1 else "normal",
+        "status": status,
         "anomaly_score": round(score, 6),
         "reason": (
             "The sensor reading differs from patterns "
@@ -63,18 +70,31 @@ def predict(reading: SensorReading):
             if prediction == -1
             else "The model did not flag this reading as unusual."
         ),
-        "message": (
-            "Unusual sensor pattern detected"
-            if prediction == -1
-            else "No anomaly detected by the model"
-        )
+        "message": message
     }
 
+    # Save the reading and prediction in API memory
+    sensor_history.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "sensor_reading": data,
+        **result
+    })
 
+    return result
+
+
+# Return recent predictions to the dashboard
+@app.get("/history")
+def get_history():
+    return list(sensor_history)
+
+
+# Temperature-drop detection
 class TemperatureContext(BaseModel):
     previous_temp: float
     current_temp: float
     next_temp: float
+
 
 @app.post("/check-temperature-drop")
 def check_temperature_drop(reading: TemperatureContext):
@@ -111,3 +131,4 @@ def check_temperature_drop(reading: TemperatureContext):
         "status": status,
         "message": message,
     }
+
